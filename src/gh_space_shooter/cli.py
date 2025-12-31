@@ -155,7 +155,7 @@ def _generate_gif(data: ContributionData, file_path: str, strategy_name: str) ->
 
     # Create animator and generate GIF
     try:
-        animator = Animator(data, strategy, frame_duration=100)
+        animator = Animator(data, strategy)
         animator.generate_gif(file_path)
         console.print(f"[green]✓[/green] GIF saved to {file_path}")
     except Exception as e:

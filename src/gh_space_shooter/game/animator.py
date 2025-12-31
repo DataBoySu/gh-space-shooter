@@ -4,6 +4,8 @@ from typing import List
 
 from PIL import Image
 
+
+from ..constants import FRAME_DURATION_MS
 from ..github_client import ContributionData
 from .game_state import GameState
 from .renderer import Renderer
@@ -18,7 +20,7 @@ class Animator:
         self,
         contribution_data: ContributionData,
         strategy: BaseStrategy,
-        frame_duration: int = 100,
+        frame_duration: int = FRAME_DURATION_MS,
     ):
         """
         Initialize animator.
@@ -70,36 +72,26 @@ class Animator:
             List of PIL Images representing animation frames
         """
         frames = []
-        bullet_flight_steps = 5  # Number of frames for bullet to travel
 
         # Add initial frame (ship off-screen)
         frames.append(renderer.render_frame())
 
         # Process each action from the strategy
         for action in self.strategy.generate_actions(self.contribution_data):
-            # Move ship to action position (only horizontal movement)
             game_state.ship.move_to(action.week)
+            while game_state.can_take_action() is False:
+                game_state.animate()
+                frames.append(renderer.render_frame())
 
-            # If action is to shoot, fire bullet and animate it
             if action.shoot:
-                bullet = game_state.shoot(action.week, action.day)
-
-                # Animate bullet flying from ship to target
-                for step in range(bullet_flight_steps):
-                    bullet.progress = (step + 1) / bullet_flight_steps
-                    frames.append(renderer.render_frame())
-
-                # Hit the enemy when bullet reaches target
-                game_state.hit_target(action.week, action.day)
-
-                # Clear bullets for next action
-                game_state.clear_bullets()
-            else:
-                # Just render ship movement (no shooting)
+                game_state.shoot()
+                game_state.animate()
                 frames.append(renderer.render_frame())
 
         # Add final frames showing completion
-        frames.append(renderer.render_frame())
-        frames.append(renderer.render_frame())  # Hold final frame longer
+        while not game_state.is_complete():
+            game_state.animate()
+        for _ in range(5):
+            frames.append(renderer.render_frame())
 
         return frames

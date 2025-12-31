@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, List
 
 from PIL import ImageDraw
 
-from ..constants import NUM_DAYS, NUM_WEEKS
+from ..constants import BULLET_SPEED, NUM_DAYS, NUM_WEEKS, SHIP_POSITION_Y, SHIP_SPEED
 from ..github_client import ContributionData
 
 if TYPE_CHECKING:
@@ -34,21 +34,21 @@ class Drawable(ABC):
 class Enemy(Drawable):
     """Represents an enemy at a specific position."""
 
-    def __init__(self, week: int, day: int, health: int):
+    def __init__(self, x: int, y: int, health: int, game_state: "GameState"):
         """
         Initialize an enemy.
 
         Args:
-            week: Week position (0-51)
-            day: Day position (0-6)
+            x: X position (0-51)
+            y: Y position (0-6)
             health: Initial health/lives (1-4)
         """
-        self.week = week
-        self.day = day
+        self.x = x
+        self.y = y
         self.health = health
-        self.max_health = health
+        self.game_state = game_state
 
-    def take_damage(self) -> bool:
+    def take_damage(self) -> None:
         """
         Enemy takes 1 damage.
 
@@ -56,25 +56,16 @@ class Enemy(Drawable):
             True if enemy is destroyed (health <= 0), False otherwise
         """
         self.health -= 1
-        return self.health <= 0
-
-    def is_alive(self) -> bool:
-        """Check if enemy is still alive."""
-        return self.health > 0
+        if self.health <= 0:
+            self.game_state.enemies.remove(self)
 
     def animate(self) -> None:
         """Update enemy state for next frame (enemies don't animate currently)."""
         pass
 
     def draw(self, draw: ImageDraw.ImageDraw, context: "RenderContext") -> None:
-        """Draw the enemy at its position."""
-        if not self.is_alive():
-            return
-
-        # Get position from context helper
-        x, y = context.get_cell_position(self.week, self.day)
-
-        # Get color based on current health
+        """Draw the enemy at its position."""        
+        x, y = context.get_cell_position(self.x, self.y)
         color = context.enemy_colors.get(self.health, context.enemy_colors[1])
 
         draw.rectangle(
@@ -86,41 +77,40 @@ class Enemy(Drawable):
 class Bullet(Drawable):
     """Represents a bullet fired by the ship."""
 
-    def __init__(self, week: int, target_day: int, progress: float = 0.0):
+    def __init__(self, x: int, game_state: "GameState"):
         """
         Initialize a bullet.
 
         Args:
-            week: Current week position
-            target_day: Target day position (enemy position)
-            progress: Animation progress from ship to target (0.0 to 1.0)
+            x: X position (0-51)
+            game_state: The game state
         """
-        self.week = week
-        self.target_day = target_day
-        self.progress = progress  # 0.0 = at ship, 1.0 = at target
+        self.x = x
+        self.y = SHIP_POSITION_Y - 1
+        self.game_state = game_state
+
+
+    def _check_collision(self) -> Enemy | None:
+        """Check if bullet has hit an enemy at its current position."""
+        for enemy in self.game_state.enemies:
+            if enemy.x == self.x and enemy.y >= self.y:
+                return enemy
+        return None
 
     def animate(self) -> None:
-        """Update bullet position for next frame (controlled externally)."""
-        pass
+        """Update bullet position for next frame."""
+        self.y -= BULLET_SPEED
+        hit_enemy = self._check_collision()
+        if hit_enemy:
+            hit_enemy.take_damage()
+            self.game_state.bullets.remove(self)
 
     def draw(self, draw: ImageDraw.ImageDraw, context: "RenderContext") -> None:
         """Draw the bullet at its animated position."""
-        # Get horizontal position (week)
-        x, _ = context.get_cell_position(self.week, 0)
-        x += context.cell_size // 2  # Center of cell
+        x, y = context.get_cell_position(self.x, self.y)
+        x += context.cell_size // 2
+        y += context.cell_size // 2
 
-        # Calculate vertical position based on progress
-        # Start from ship position (below grid)
-        ship_y = context.padding + NUM_DAYS * (context.cell_size + context.cell_spacing) + 10
-
-        # End at target enemy position
-        _, target_y = context.get_cell_position(self.week, self.target_day)
-        target_y += context.cell_size // 2  # Center of cell
-
-        # Interpolate based on progress
-        y = ship_y + (target_y - ship_y) * self.progress
-
-        # Draw bullet as small circle
         radius = 3
         draw.ellipse(
             [x - radius, y - radius, x + radius, y + radius],
@@ -131,42 +121,43 @@ class Bullet(Drawable):
 class Ship(Drawable):
     """Represents the player's ship."""
 
-    def __init__(self):
+    def __init__(self, game_state: "GameState"):
         """Initialize the ship at starting position."""
-        self.week = -1  # Start off-screen to the left
-        # Ship stays below the grid
+        self.x = 25  # Start middle of screen
+        self.target_x = self.x
+        self.game_state = game_state
 
-    def move_to(self, week: int):
+    def move_to(self, x: int):
         """
-        Move ship to a new week position.
+        Move ship to a new x position.
 
         Args:
-            week: Target week
+            x: Target x position
         """
-        self.week = week
+        self.target_x = x
+
+    def is_moving(self) -> bool:
+        """Check if ship is moving to a new position."""
+        return self.x != self.target_x
 
     def animate(self) -> None:
         """Update ship state for next frame (controlled externally)."""
-        pass
+        if self.x < self.target_x:
+            self.x = min(self.x + SHIP_SPEED, self.target_x)
+        elif self.x > self.target_x:
+            self.x = max(self.x - SHIP_SPEED, self.target_x)
 
     def draw(self, draw: ImageDraw.ImageDraw, context: "RenderContext") -> None:
         """Draw the ship below the grid."""
         # Ship stays below the grid at a fixed vertical position
-        if self.week >= 0:
-            x, _ = context.get_cell_position(self.week, 0)
-        else:
-            # Ship off-screen to the left
-            x = context.padding - 20
-
-        # Position ship below the grid
-        ship_y = context.padding + NUM_DAYS * (context.cell_size + context.cell_spacing) + 10
+        x, y = context.get_cell_position(self.x, SHIP_POSITION_Y)
 
         # Draw simple ship shape (triangle pointing up)
         draw.polygon(
             [
-                (x + context.cell_size // 2, ship_y),  # Top point (front)
-                (x, ship_y + context.cell_size),  # Bottom left
-                (x + context.cell_size, ship_y + context.cell_size),  # Bottom right
+                (x + context.cell_size // 2, y),  # Top point (front)
+                (x, y + context.cell_size),  # Bottom left
+                (x + context.cell_size, y + context.cell_size),  # Bottom right
             ],
             fill=context.ship_color,
         )
@@ -183,7 +174,7 @@ class GameState(Drawable):
             contribution_data: The GitHub contribution data
         """
         self.contribution_data = contribution_data
-        self.ship = Ship()
+        self.ship = Ship(self)
         self.enemies: List[Enemy] = []
         self.bullets: List[Bullet] = []
 
@@ -196,88 +187,41 @@ class GameState(Drawable):
         for week_idx, week in enumerate(weeks):
             for day_idx, day in enumerate(week["days"]):
                 level = day["level"]
-                if level > 0:  # Only create enemy if there are contributions
-                    enemy = Enemy(week=week_idx, day=day_idx, health=level)
-                    self.enemies.append(enemy)
+                if level <= 0:
+                    continue
+                enemy = Enemy(x=week_idx, y=day_idx, health=level, game_state=self)
+                self.enemies.append(enemy)
 
-    def get_enemy_at(self, week: int, day: int) -> Enemy | None:
-        """
-        Get enemy at a specific position.
-
-        Args:
-            week: Week position
-            day: Day position
-
-        Returns:
-            Enemy if one exists at that position, None otherwise
-        """
-        for enemy in self.enemies:
-            if enemy.week == week and enemy.day == day and enemy.is_alive():
-                return enemy
-        return None
-
-    def shoot(self, week: int, day: int) -> Bullet:
+    def shoot(self) -> None:
         """
         Ship shoots a bullet at target position.
-
-        Args:
-            week: Target week
-            day: Target day
-
-        Returns:
-            The created bullet
         """
-        # Create bullet starting at ship position (progress = 0.0)
-        bullet = Bullet(week=week, target_day=day, progress=0.0)
+        bullet = Bullet(self.ship.x, game_state=self)
         self.bullets.append(bullet)
-        return bullet
-
-    def hit_target(self, week: int, day: int):
-        """
-        Hit enemy at target position (when bullet reaches it).
-
-        Args:
-            week: Target week
-            day: Target day
-        """
-        enemy = self.get_enemy_at(week, day)
-        if enemy:
-            enemy.take_damage()
-
-    def clear_bullets(self):
-        """Clear all bullets from the screen."""
-        self.bullets.clear()
-
-    def get_alive_enemies(self) -> List[Enemy]:
-        """Get list of all alive enemies."""
-        return [enemy for enemy in self.enemies if enemy.is_alive()]
 
     def is_complete(self) -> bool:
         """Check if game is complete (all enemies destroyed)."""
-        return len(self.get_alive_enemies()) == 0
+        return len(self.enemies) == 0
+
+    def can_take_action(self) -> bool:
+        """Check if ship can take an action (not moving)."""
+        return not self.ship.is_moving()
 
     def animate(self) -> None:
         """Update all game objects for next frame."""
         self.ship.animate()
-        for enemy in self.get_alive_enemies():
+        for enemy in self.enemies:
             enemy.animate()
         for bullet in self.bullets:
             bullet.animate()
 
     def draw(self, draw: ImageDraw.ImageDraw, context: "RenderContext") -> None:
         """Draw all game objects including the grid."""
-        # Draw grid background first
         self._draw_grid(draw, context)
-
-        # Draw enemies
-        for enemy in self.get_alive_enemies():
+        for enemy in self.enemies:
             enemy.draw(draw, context)
-
-        # Draw bullets
         for bullet in self.bullets:
             bullet.draw(draw, context)
-
-        # Draw ship (on top)
         self.ship.draw(draw, context)
 
     def _draw_grid(self, draw: ImageDraw.ImageDraw, context: "RenderContext") -> None:
