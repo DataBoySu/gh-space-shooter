@@ -55,7 +55,7 @@ runs:
         gh-space-shooter ${{ inputs.username }} \
           --output ${{ inputs.output-path }} \
           --strategy ${{ inputs.strategy }}
-        echo "writing gif ..." >> $GITHUB_OUTPUT
+        echo "writing gif to ${{ inputs.output-path }}"
 
     - name: Commit and push GIF
       shell: bash
