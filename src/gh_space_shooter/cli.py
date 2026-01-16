@@ -254,7 +254,7 @@ def _find_readme() -> str | None:
     current = os.path.abspath(".")
     
     for _ in range(4):
-        readme_path = os.path.join(current, "README. md")
+        readme_path = os.path.join(current, "README.md")
         if os.path.isfile(readme_path):
             return readme_path
         
