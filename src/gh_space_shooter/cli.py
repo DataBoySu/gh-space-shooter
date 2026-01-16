@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 
 import typer
@@ -198,8 +199,42 @@ def _generate_gif(
             f.write(buffer.getvalue())
 
         console.print(f"[green]✓[/green] GIF saved to {file_path}")
+
+        # if README.md has the shooter section markers, insert the image.
+        _maybe_update_readme_with_gif(file_path)
     except Exception as e:
         raise CLIError(f"Failed to generate GIF: {e}")
+
+
+def _maybe_update_readme_with_gif(gif_path: str) -> None:
+    try:
+        with open("README.md", "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return
+
+    pattern = re.compile(
+        r"(<!--START_SECTION:shooter-->)(.*?)(<!--END_SECTION:shooter-->)",
+        flags=re.DOTALL,
+    )
+
+    def repl(match: re.Match[str]) -> str:
+        return (
+            f"{match.group(1)}\n"
+            f"![GitHub Space Shooter]({gif_path})\n"
+            f"{match.group(3)}"
+        )
+
+    new_content, count = pattern.subn(repl, content, count=1)
+    if count == 0 or new_content == content:
+        return
+
+    try:
+        with open("README.md", "w", encoding="utf-8") as f:
+            f.write(new_content)
+        console.print("[green]✓[/green] Updated README.md shooter section")
+    except OSError:
+        return
 
 
 app = typer.Typer()
